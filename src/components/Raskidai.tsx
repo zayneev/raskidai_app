@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Script from 'next/script';
-import { ArrowDownLeft, ArrowUpRight, ArrowLeft, ArrowRight, ArrowLeftRight, Plus, ChevronRight, Ellipsis, Check, X, Wallet, UserRound, Sparkles, Clock3, House, Car, Utensils, Ticket, Shapes, UsersRound, Moon, Sun, Archive, CheckCheck, Pencil, Trash2, Info, CalendarDays, Send, RotateCcw } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, ArrowLeft, ArrowRight, ArrowLeftRight, Plus, ChevronRight, Ellipsis, Check, X, Wallet, UserRound, Sparkles, Clock3, House, Car, Utensils, Ticket, Shapes, UsersRound, Moon, Sun, Archive, CheckCheck, Pencil, Trash2, Info, CalendarDays, Send, RotateCcw, Copy } from 'lucide-react';
 import { ME, STORAGE_KEY, balances, categories, confirmPendingSettlement, distribute, members, money, parseMoney, personalSummary, plural, seedTrips, today, transfers, uid, type Category, type Expense, type Member, type Settlement, type SplitMode, type Trip } from '@/lib/model';
 
 type Tab = 'trips' | 'activity' | 'profile';
@@ -96,13 +96,51 @@ function Sheet({ title, onClose, children }: { title: string; onClose: () => voi
   </dialog>;
 }
 
+function InviteLink({ eventId }: { eventId: string }) {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const linkRef = useRef<HTMLTextAreaElement>(null);
+
+  async function createInvite() {
+    setLoading(true); setError('');
+    try {
+      const result = await api('invite', { eventId });
+      if (typeof result.url !== 'string' || !result.url) throw new Error('Не удалось получить ссылку приглашения');
+      setUrl(result.url);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось создать приглашение. Попробуйте ещё раз.'); }
+    finally { setLoading(false); }
+  }
+
+  async function copyInvite() {
+    setCopying(true); setMessage('');
+    try { await navigator.clipboard.writeText(url); setMessage('Ссылка скопирована'); }
+    catch {
+      linkRef.current?.focus(); linkRef.current?.select();
+      setMessage('Не удалось скопировать автоматически. Ссылка выделена — скопируйте её вручную.');
+    } finally { setCopying(false); }
+  }
+
+  return <div className="invite-link-panel">
+    {url ? <>
+      <label className="field-label" htmlFor="event-invite-link">Ссылка приглашения</label>
+      <textarea ref={linkRef} id="event-invite-link" className="text-input invite-link-input" rows={3} readOnly value={url} onFocus={event => event.currentTarget.select()} />
+      <button type="button" className="primary-button" disabled={copying} onClick={() => { void copyInvite(); }}><Copy size={18} />{copying ? 'Копируем…' : 'Скопировать ссылку'}</button>
+      {message && <p className="help-note" role="status">{message}</p>}
+    </> : <button type="button" className="primary-button" disabled={loading} onClick={() => { void createInvite(); }}><Send size={18} />{loading ? 'Создаём ссылку…' : 'Пригласить по ссылке'}</button>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <p className="help-note">Отправьте ссылку участнику: он откроет её под своим Telegram-аккаунтом.</p>
+  </div>;
+}
+
 export default function Raskidai() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [mode, setMode] = useState<'loading' | 'demo' | 'live' | 'error'>('loading');
   const [telegramReady, setTelegramReady] = useState(false);
   const live = mode === 'live';
   const [authError, setAuthError] = useState('');
-  const [sharing, setSharing] = useState(false);
   const [currentMember, setCurrentMember] = useState<Member>(members[0]);
   const [storageError, setStorageError] = useState(false);
   const [tab, setTab] = useState<Tab>('trips');
@@ -270,7 +308,7 @@ export default function Raskidai() {
     {modal?.type === 'expense' && trip && <Sheet title={modal.expense ? 'Изменить расход' : 'Новый расход'} onClose={() => setModal(null)}><ExpenseForm key={modal.expense?.id || 'new'} trip={trip} expense={modal.expense} onSave={(expense, requestId) => { if (live) { void perform('saveExpense', { eventId: trip.id, expense, requestId, expectedVersion: modal.expense?.version ?? null }, modal.expense ? 'Расход изменён' : 'Расход добавлен. Всё раскидали!'); return; } updateTrip(t => ({ ...t, expenses: modal.expense ? t.expenses.map(e => e.id === expense.id ? expense : e) : [expense, ...t.expenses] })); setModal(null); setTripTab('expenses'); notify(modal.expense ? 'Расход изменён' : 'Расход добавлен. Всё раскидали!'); }} /></Sheet>}
     {modal?.type === 'settlement' && trip && canMarkSettlement(modal.move) && <Sheet title={modal.move.from === ME ? 'Я перевел' : 'Я получил'} onClose={() => setModal(null)}><SettlementForm trip={trip} move={modal.move} onSave={(amount, date, id) => { const move = modal.move; if (!canMarkSettlement(move)) return; if (live) { if (move.from !== ME) return; void perform('createTransfer', { eventId: trip.id, id, to: move.to, amount, date }, 'Перевод ожидает подтверждения получателя'); return; } const outgoing = move.from === ME; updateTrip(t => ({ ...t, settlements: [{ id: uid(), from: move.from, to: move.to, amount, date, status: outgoing ? 'pending' : 'confirmed', confirmedBy: outgoing ? undefined : ME }, ...t.settlements] })); setModal(null); notify(outgoing ? 'Перевод ожидает подтверждения получателя' : 'Получение подтверждено. Балансы обновлены'); }} /></Sheet>}
     {modal?.type === 'demo-confirm' && trip && demoPending && !telegramReady && <Sheet title="Демо: подтверждение" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">В рабочем приложении получение подтвердит второй участник в своём аккаунте. Здесь можно проверить этот шаг на тестовых данных.</p><div className="demo-transfer-preview"><strong><MemberName id={demoPending.from} trip={trip} /> → <MemberName id={demoPending.to} trip={trip} /></strong><span>{money(demoPending.amount)}</span></div><button className="primary-button" onClick={() => confirmPending(demoPending.id, demoPending.to)}><CheckCheck size={19} />Подтвердить за получателя</button><button className="secondary-button" onClick={() => setModal(null)}>Отмена</button></div></Sheet>}
-    {modal?.type === 'members' && trip && <Sheet title="Участники" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">В мероприятии {trip.members.length} {plural(trip.members.length, ['участник', 'участника', 'участников'])}.</p><div className="list-surface">{trip.members.map(m => <div className="member-balance" key={m.id}><Avatar member={m} /><div><strong><DisplayMemberName member={m} /></strong>{m.username && <span>{m.username}</span>}</div>{m.id === trip.ownerId || (!live && m.id === ME) ? <span className="subtle-pill">Создатель</span> : <Check size={18} className="positive-text" />}</div>)}</div>{live ? <><button className="primary-button" disabled={sharing} onClick={() => { setSharing(true); api('invite', { eventId: trip.id }).then(async result => { if (navigator.share) await navigator.share({ title: trip.name, url: result.url }); else { await navigator.clipboard.writeText(result.url); notify('Ссылка скопирована'); } }).catch(error => notify(error.message)).finally(() => setSharing(false)); }}><Send size={18} />Пригласить по ссылке</button><p className="help-note">Друг откроет ссылку под своим Telegram-аккаунтом.</p></> : <>{availableMembers.filter(m => !trip.members.some(p => p.id === m.id)).map(member => <button className="add-member-button" key={member.id} aria-label={`Добавить участника ${member.name}`} onClick={() => { updateTrip(t => ({ ...t, members: [...t.members, member] })); notify(`${member.name} теперь в мероприятии`); }}><Avatar member={member} small /><span>{member.name}</span><Plus size={18} /></button>)}<p className="help-note">В демо можно добавлять тестовых друзей.</p></>}</div></Sheet>}
+    {modal?.type === 'members' && trip && <Sheet title="Участники" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">В мероприятии {trip.members.length} {plural(trip.members.length, ['участник', 'участника', 'участников'])}.</p><div className="list-surface">{trip.members.map(m => <div className="member-balance" key={m.id}><Avatar member={m} /><div><strong><DisplayMemberName member={m} /></strong>{m.username && <span>{m.username}</span>}</div>{m.id === trip.ownerId || (!live && m.id === ME) ? <span className="subtle-pill">Создатель</span> : <Check size={18} className="positive-text" />}</div>)}</div>{live ? <InviteLink key={trip.id} eventId={trip.id} /> : <>{availableMembers.filter(m => !trip.members.some(p => p.id === m.id)).map(member => <button className="add-member-button" key={member.id} aria-label={`Добавить участника ${member.name}`} onClick={() => { updateTrip(t => ({ ...t, members: [...t.members, member] })); notify(`${member.name} теперь в мероприятии`); }}><Avatar member={member} small /><span>{member.name}</span><Plus size={18} /></button>)}<p className="help-note">В демо можно добавлять тестовых друзей.</p></>}</div></Sheet>}
     {modal?.type === 'details' && trip && <Sheet title="Расход" onClose={() => setModal(null)}><ExpenseDetails trip={trip} expense={modal.expense} canEdit={!live || modal.expense.author === ME || trip.ownerId === ME} onEdit={() => setModal({ type: 'expense', expense: modal.expense })} onDelete={() => { if (live) { void perform('deleteExpense', { eventId: trip.id, id: modal.expense.id, version: modal.expense.version }, 'Расход удалён, балансы пересчитаны'); return; } updateTrip(t => ({ ...t, expenses: t.expenses.filter(e => e.id !== modal.expense.id) })); setModal(null); notify('Расход удалён, балансы пересчитаны'); }} /></Sheet>}
     {modal?.type === 'menu' && trip && <Sheet title="Настройки мероприятия" onClose={() => setModal(null)}><div className="sheet-body"><button className="menu-row" onClick={() => setModal({ type: 'members' })}><UsersRound size={22} /><span>Участники мероприятия</span><ChevronRight size={18} /></button>{(!live || trip.ownerId === ME) && <button className="menu-row" onClick={() => { if (trip.archived) { if (live) { void perform('archive', { eventId: trip.id, archived: false }, 'Мероприятие снова активно'); return; } updateTrip(t => ({ ...t, archived: false })); setModal(null); notify('Мероприятие снова активно'); } else setModal({ type: 'archive' }); }}><Archive size={22} /><span>{trip.archived ? 'Вернуть из архива' : 'Завершить мероприятие'}</span><ChevronRight size={18} /></button>}<button className="menu-row" onClick={() => { setDark(!dark); setModal(null); }}><Moon size={22} /><span>{dark ? 'Светлая тема' : 'Тёмная тема'}</span><ChevronRight size={18} /></button></div></Sheet>}
     {modal?.type === 'archive' && trip && <Sheet title={outstandingCount ? 'Сначала завершите расчёты' : 'Завершить мероприятие?'} onClose={() => setModal(null)}><div className="sheet-body archive-sheet">{outstandingCount ? <><p className="form-intro">Мероприятие можно отправить в архив, когда все долги погашены и переводы подтверждены. Сейчас осталось {outstandingCount} {plural(outstandingCount, ['перевод', 'перевода', 'переводов'])} на {money(outstandingAmount)}{pendingSettlements.length ? `; ${pendingSettlements.length} ${plural(pendingSettlements.length, ['ожидает', 'ожидают', 'ожидают'])} подтверждения` : ''}.</p><button className="primary-button" onClick={() => { setModal(null); setTripTab('balances'); }}>Посмотреть балансы</button><button className="secondary-button" onClick={() => setModal(null)}>Закрыть</button></> : <><p className="form-intro">Все расчёты закрыты. Мероприятие будет перемещено в архив.</p><button className="primary-button" onClick={() => { if (transfers(trip).length || trip.settlements.some(item => item.status === 'pending')) return; if (live) { void perform('archive', { eventId: trip.id, archived: true }, 'Мероприятие перенесено в архив'); return; } updateTrip(t => ({ ...t, archived: true })); setModal(null); notify('Мероприятие перенесено в архив'); }}>Завершить и архивировать</button><button className="secondary-button" onClick={() => setModal(null)}>Отмена</button></>}</div></Sheet>}

@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  agent-browser: true
+verifyDepsBeforeRun: false

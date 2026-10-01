@@ -220,16 +220,16 @@ export default function Raskidai() {
 
   return <>
     <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" onReady={() => { void initTelegram(); }} />
-    <div className="app-shell">
+    <div className={trip ? 'app-shell' : 'app-shell overview-shell'}>
       <div className="launch-wordmark is-ready">Раскидай</div>
-      <header className="mini-header">
-        {trip && <button className="back-link" onClick={() => setTripId(null)}><ArrowLeft size={20} /><span>Мероприятия</span></button>}
-        <div className="header-actions">{!trip && !live && <span className="demo-badge">демо</span>}<button className="icon-button" onClick={() => trip ? setModal({ type: 'menu' }) : changeTab('profile')} aria-label={trip ? 'Меню мероприятия' : 'Открыть профиль'}>{trip ? <Ellipsis size={23} /> : <Avatar member={currentMember} small />}</button></div>
-      </header>
+      {trip && <header className="mini-header">
+        <button className="back-link" onClick={() => setTripId(null)}><ArrowLeft size={20} /><span>Мероприятия</span></button>
+        <div className="header-actions"><button className="icon-button" onClick={() => setModal({ type: 'menu' })} aria-label="Меню мероприятия"><Ellipsis size={23} /></button></div>
+      </header>}
       {storageError && <div className="storage-warning" role="alert">Браузер не разрешает сохранение. Данные доступны до закрытия страницы.</div>}
       <main>
         {!trip && tab === 'trips' && <div className="screen home-screen">
-          <div className="page-heading"><h1>Мои мероприятия</h1></div>
+          <div className="page-heading"><h1>Мои мероприятия</h1>{!live && <span className="demo-badge">демо</span>}</div>
           <div className="section-heading"><h2>{archived ? 'Завершённые мероприятия' : 'Активные'} <span>{visibleTrips.length}</span></h2><button className="text-button" onClick={() => setArchived(!archived)}>{archived ? 'Активные' : 'Архив'}{archived ? <CalendarDays size={15} /> : <Archive size={15} />}</button></div>
           <div className="trip-list">{visibleTrips.map(item => <TripCard key={item.id} trip={item} onOpen={() => openTrip(item.id)} />)}</div>
           {!visibleTrips.length && <div className="empty-state"><CalendarDays size={35} /><h3>{archived ? 'Архив пуст' : 'Пока нет мероприятий'}</h3><p>{archived ? 'Завершённые мероприятия появятся здесь.' : 'Создайте мероприятие и пригласите участников.'}</p></div>}

@@ -429,6 +429,8 @@ h2 { font-size:18px; }
 }
 html { -webkit-text-size-adjust:100%; }
 .app-shell { padding-top:var(--app-safe-top); padding-left:var(--app-safe-left); padding-right:var(--app-safe-right); }
+/* Without the overview toolbar, reserve only the wordmark / Telegram controls. */
+.app-shell.overview-shell { padding-top:max(48px, var(--app-safe-top)); }
 main { padding-bottom:calc(108px + var(--app-safe-bottom)); }
 .bottom-nav { bottom:calc(21px + var(--app-safe-bottom)); width:calc(100% - 28px - var(--app-safe-left) - var(--app-safe-right)); }
 .event-dock { bottom:calc(96px + var(--app-safe-bottom)); padding-left:calc(22px + var(--app-safe-left)); padding-right:calc(22px + var(--app-safe-right)); }

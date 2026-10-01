@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-store/
+.next/
+tsconfig.tsbuildinfo
+.env*
+!.env.example
+artifacts/
+.vercel
+.DS_Store

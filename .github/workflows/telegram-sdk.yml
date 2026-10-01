@@ -1,0 +1,70 @@
+name: Check Telegram WebApp SDK
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: telegram-sdk-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Compare and prepare SDK update
+        id: sdk
+        run: node scripts/update-telegram-sdk.mjs --update
+      - name: Check proposed update
+        if: steps.sdk.outputs.changed == 'true'
+        run: |
+          npm install --global pnpm@11.19.0
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+          pnpm build
+          git diff --binary -- public/vendor/telegram-web-app.js src/lib/telegram-sdk-version.json > telegram-sdk-update.patch
+      - name: Keep update patch for review
+        if: steps.sdk.outputs.changed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: telegram-sdk-update
+          path: telegram-sdk-update.patch
+      - name: Propose SDK update
+        if: steps.sdk.outputs.changed == 'true'
+        id: proposal
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          branch: automation/telegram-sdk
+          add-paths: |
+            public/vendor/telegram-web-app.js
+            src/lib/telegram-sdk-version.json
+          commit-message: 'chore: update Telegram WebApp SDK'
+          title: 'Обновить локальный Telegram WebApp SDK'
+          draft: true
+          body: |
+            Официальный SDK изменился. Локальная копия подготовлена для проверки.
+            Источник: https://telegram.org/js/telegram-web-app.js
+            SHA-256: `${{ steps.sdk.outputs.sha256 }}`
+
+            Проверки типов, тесты и сборка прошли. Перед слиянием проверьте запуск
+            Mini App и вход на реальном устройстве в Telegram.
+      - name: Report blocked PR creation
+        if: steps.proposal.outcome == 'failure'
+        run: |
+          echo 'SDK update is available as the telegram-sdk-update artifact.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Enable Settings → Actions → General → Allow GitHub Actions to create and approve pull requests to receive update PRs.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1

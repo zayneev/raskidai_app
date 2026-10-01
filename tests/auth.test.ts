@@ -40,6 +40,6 @@ test('Expense normalization rejects forged payer and malformed shares', () => {
 });
 test('Invite links work with a Main Mini App or a Direct Link Mini App', () => {
   const token = 'a'.repeat(32);
-  assert.equal(telegramInviteUrl('@raskidai_app_bot', token), `https://t.me/raskidai_app_bot?startapp=${token}&mode=fullscreen`);
-  assert.equal(telegramInviteUrl('raskidai_app_bot', token, 'raskidai'), `https://t.me/raskidai_app_bot/raskidai?startapp=${token}&mode=fullscreen`);
+  assert.equal(telegramInviteUrl('@raskidai_app_bot', token), `https://t.me/raskidai_app_bot?startapp=${token}`);
+  assert.equal(telegramInviteUrl('raskidai_app_bot', token, 'raskidai'), `https://t.me/raskidai_app_bot/raskidai?startapp=${token}`);
 });

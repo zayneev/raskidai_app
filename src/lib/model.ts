@@ -1,4 +1,4 @@
-export type Member = { id: string; name: string; initials: string; color: string; username: string };
+export type Member = { id: string; name: string; initials: string; color: string; username: string; removed?: boolean };
 export type Category = 'home' | 'transport' | 'food' | 'fun' | 'other';
 export type SplitMode = 'equal' | 'percent' | 'shares' | 'exact';
 export type Expense = { id: string; title: string; amount: number; payer: string; splits: Record<string, number>; category: Category; date: string; mode: SplitMode; author: string; history: string[]; version?: number };
@@ -85,6 +85,24 @@ export function confirmPendingSettlement(trip: Trip, settlementId: string, actor
   if (!settlement || settlement.status !== 'pending' || settlement.to !== actorId) throw new Error('Подтвердить получение может только получатель перевода');
   return { ...trip, settlements: trip.settlements.map(item => item.id === settlementId ? { ...item, status: 'confirmed', confirmedBy: actorId } : item) };
 }
+export function activeMembers(trip: Trip): Member[] { return trip.members.filter(member => !member.removed); }
+export function memberRemovalReason(trip: Trip, actorId: string, memberId: string): string | null {
+  if (trip.ownerId !== actorId) return 'Удалять участников может только создатель мероприятия';
+  if (memberId === trip.ownerId) return 'Создателя мероприятия нельзя удалить';
+  if (trip.archived) return 'Сначала верните мероприятие из архива';
+  if (!activeMembers(trip).some(member => member.id === memberId)) return 'Участник уже удалён из мероприятия';
+  if (trip.settlements.some(item => item.status === 'pending' && (item.from === memberId || item.to === memberId))) return 'Сначала подтвердите все переводы участника';
+  if (balances(trip)[memberId] !== 0) return 'Сначала завершите расчёты с участником';
+  return null;
+}
+export function removeTripMember(trip: Trip, actorId: string, memberId: string): Trip {
+  const reason = memberRemovalReason(trip, actorId, memberId);
+  if (reason) throw new Error(reason);
+  return { ...trip, members: trip.members.map(member => member.id === memberId ? { ...member, removed: true } : member) };
+}
+export function expenseHasRemovedMember(trip: Trip, expense: Expense): boolean {
+  return trip.members.some(member => member.removed && (expense.payer === member.id || Object.hasOwn(expense.splits, member.id)));
+}
 export function transfers(trip: Trip, includePending = false) {
   const result = balances(trip, includePending);
   const debtors = Object.entries(result).filter(([, a]) => a < 0).map(([id, amount]) => ({ id, amount: -amount })).sort((a, b) => b.amount - a.amount);
@@ -104,13 +122,13 @@ function seedExpense(id: string, title: string, rubles: number, payer: string, c
   return { id, title, amount: rubles * 100, payer, category, date, splits: distribute(rubles * 100, ids, 'equal'), mode: 'equal', author: payer, history: [`Расход добавлен: ${payerName}`] };
 }
 export function seedTrips(): Trip[] { return [
-  { id: 'altai', name: 'Алтай, мы едем!', subtitle: 'Горы, костёр и свои люди', cover: 'mountains', dates: '24–30 сентября', members, archived: false, settlements: [], expenses: [
+  { id: 'altai', name: 'Алтай, мы едем!', subtitle: 'Горы, костёр и свои люди', cover: 'mountains', dates: '24–30 сентября', members, ownerId: ME, archived: false, settlements: [], expenses: [
     seedExpense('a4', 'Продукты к костру', 2800, ME, 'food', '2026-09-27'),
     seedExpense('a3', 'Ужин в «Чеч Кыш»', 4800, 'anya', 'food', '2026-09-26'),
     seedExpense('a2', 'Аренда машины', 9200, 'max', 'transport', '2026-09-25'),
     seedExpense('a1', 'Домик у реки', 28000, ME, 'home', '2026-09-24'),
   ] },
-  { id: 'sea', name: 'Выходные у моря', subtitle: 'Ещё немного лета', cover: 'sea', dates: '12–14 сентября', members: members.slice(0, 3), archived: false, settlements: [], expenses: [seedExpense('s1', 'Апартаменты', 15000, 'anya', 'home', '2026-09-12', [ME, 'anya', 'max']), seedExpense('s2', 'Завтрак у моря', 3600, ME, 'food', '2026-09-13', [ME, 'anya', 'max'])] },
-  { id: 'kazan', name: 'Казань на двоих', subtitle: 'Город, в который вернёмся', cover: 'city', dates: '2–5 августа', members: members.slice(0, 2), archived: true, settlements: [{ id: 'ks', from: 'anya', to: ME, amount: 600000, date: '2026-08-05' }], expenses: [seedExpense('k1', 'Отель в центре', 12000, ME, 'home', '2026-08-02', [ME, 'anya'])] },
+  { id: 'sea', name: 'Выходные у моря', subtitle: 'Ещё немного лета', cover: 'sea', dates: '12–14 сентября', members: members.slice(0, 3), ownerId: ME, archived: false, settlements: [], expenses: [seedExpense('s1', 'Апартаменты', 15000, 'anya', 'home', '2026-09-12', [ME, 'anya', 'max']), seedExpense('s2', 'Завтрак у моря', 3600, ME, 'food', '2026-09-13', [ME, 'anya', 'max'])] },
+  { id: 'kazan', name: 'Казань на двоих', subtitle: 'Город, в который вернёмся', cover: 'city', dates: '2–5 августа', members: members.slice(0, 2), ownerId: ME, archived: true, settlements: [{ id: 'ks', from: 'anya', to: ME, amount: 600000, date: '2026-08-05' }], expenses: [seedExpense('k1', 'Отель в центре', 12000, ME, 'home', '2026-08-02', [ME, 'anya'])] },
 ]; }
 export const STORAGE_KEY = 'raskidai:prototype:v1';

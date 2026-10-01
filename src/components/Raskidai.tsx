@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { loadTelegramSdk } from '@/lib/telegram-sdk';
 import { ArrowDownLeft, ArrowUpRight, ArrowLeft, ArrowRight, ArrowLeftRight, Plus, ChevronRight, Ellipsis, Check, X, Wallet, UserRound, Sparkles, Clock3, House, Car, Utensils, Ticket, Shapes, UsersRound, Moon, Sun, Archive, CheckCheck, Pencil, Trash2, Info, CalendarDays, Send, RotateCcw, Copy } from 'lucide-react';
-import { ME, STORAGE_KEY, balances, categories, confirmPendingSettlement, distribute, members, money, parseMoney, personalSummary, plural, seedTrips, today, transfers, uid, type Category, type Expense, type Member, type Settlement, type SplitMode, type Trip } from '@/lib/model';
+import { ME, STORAGE_KEY, activeMembers, balances, categories, confirmPendingSettlement, distribute, expenseHasRemovedMember, memberRemovalReason, members, money, parseMoney, personalSummary, plural, removeTripMember, seedTrips, today, transfers, uid, type Category, type Expense, type Member, type Settlement, type SplitMode, type Trip } from '@/lib/model';
 
 type Tab = 'trips' | 'activity' | 'profile';
 type TripTab = 'expenses' | 'balances' | 'summary';
@@ -11,7 +11,7 @@ type Move = { from: string; to: string; amount: number };
 function canMarkSettlement(move: Move) { return move.from === ME || move.to === ME; }
 type Modal = { type: 'create' } | { type: 'expense'; expense?: Expense } | { type: 'settlement'; move: Move } | { type: 'demo-confirm'; settlementId: string } | { type: 'members' } | { type: 'details'; expense: Expense } | { type: 'menu' } | { type: 'archive' } | { type: 'reset' } | null;
 type TelegramUser = { first_name?: string; last_name?: string; username?: string };
-type TelegramApp = { initData: string; ready: () => void; expand: () => void; close: () => void; colorScheme: string; isFullscreen?: boolean; requestFullscreen?: () => void; setHeaderColor?: (color: string) => void; setBackgroundColor?: (color: string) => void; BackButton: { show: () => void; hide: () => void; onClick: (fn: () => void) => void; offClick: (fn: () => void) => void }; HapticFeedback?: { impactOccurred: (style: string) => void; notificationOccurred: (style: string) => void }; onEvent: (name: string, fn: () => void) => void; offEvent: (name: string, fn: () => void) => void };
+type TelegramApp = { initData: string; ready: () => void; expand: () => void; close: () => void; colorScheme: string; setHeaderColor?: (color: string) => void; setBackgroundColor?: (color: string) => void; BackButton: { show: () => void; hide: () => void; onClick: (fn: () => void) => void; offClick: (fn: () => void) => void }; HapticFeedback?: { impactOccurred: (style: string) => void; notificationOccurred: (style: string) => void }; onEvent: (name: string, fn: () => void) => void; offEvent: (name: string, fn: () => void) => void };
 declare global { interface Window { Telegram?: { WebApp?: TelegramApp } } }
 
 const categoryIcons = { home: House, transport: Car, food: Utensils, fun: Ticket, other: Shapes };
@@ -36,7 +36,7 @@ async function api(action: string, values: Record<string, unknown> = {}) {
 function Avatar({ member, small = false }: { member: Member; small?: boolean }) { return <span className={`avatar ${small ? 'small' : ''}`} style={{ background: member.color }}>{small ? Array.from(member.initials)[0] : member.initials}</span>; }
 function Avatars({ people }: { people: Member[] }) { return <div className="avatar-stack">{people.slice(0, 4).map(person => <Avatar key={person.id} member={person} small />)}<span>{people.length} {plural(people.length, ['участник', 'участника', 'участников'])}</span></div>; }
 function CategoryIcon({ category }: { category: Category }) { const Icon = categoryIcons[category]; const color = categories.find(c => c.id === category)!.color; return <span className="category-icon" style={{ color, background: `${color}18` }}><Icon size={21} strokeWidth={1.8} /></span>; }
-function DisplayMemberName({ member }: { member: Member }) { return <>{member.name}{member.id === ME && <small className="self-label"> (Вы)</small>}</>; }
+function DisplayMemberName({ member }: { member: Member }) { return <>{member.name}{member.id === ME && <small className="self-label"> (Вы)</small>}{member.removed && <small className="self-label"> (не участвует)</small>}</>; }
 function MemberName({ id, trip }: { id: string; trip: Trip }) {
   const member = trip.members.find(item => item.id === id) || members.find(item => item.id === id);
   return member ? <DisplayMemberName member={member} /> : null;
@@ -59,6 +59,7 @@ function refreshDemoNames(trip: Trip): Trip {
   };
   return {
     ...trip,
+    ownerId: trip.ownerId || ME,
     members: trip.members.map(member => { const demo = members.find(item => item.id === member.id); return demo ? { ...member, name: demo.name, initials: demo.initials, username: demo.username } : member; }),
     expenses: trip.expenses.map(expense => ({ ...expense, history: expense.history.map(fullHistoryName) })),
   };
@@ -135,6 +136,39 @@ function InviteLink({ eventId }: { eventId: string }) {
   </div>;
 }
 
+function MembersPanel({ trip, live, availableMembers, onRemove, onAdd }: { trip: Trip; live: boolean; availableMembers: Member[]; onRemove: (memberId: string) => Promise<void>; onAdd: (member: Member) => void }) {
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const people = activeMembers(trip);
+  const former = trip.members.filter(member => member.removed);
+  const canManage = trip.ownerId === ME && !trip.archived;
+  const selected = people.find(member => member.id === removingId);
+  const reason = selected ? memberRemovalReason(trip, ME, selected.id) : null;
+  async function confirmRemoval() {
+    if (!selected || reason || busy) return;
+    setBusy(true); setError('');
+    try { await onRemove(selected.id); setRemovingId(null); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Не удалось удалить участника'); }
+    finally { setBusy(false); }
+  }
+  return <div className="sheet-body">
+    <p className="form-intro">В мероприятии {people.length} {plural(people.length, ['участник', 'участника', 'участников'])}.</p>
+    <div className="list-surface">{people.map(member => <div className="member-balance member-management-row" key={member.id}>
+      <Avatar member={member} /><div><strong><DisplayMemberName member={member} /></strong>{member.username && <span>{member.username}</span>}</div>
+      {member.id === trip.ownerId ? <span className="subtle-pill">Создатель</span> : canManage ? <button className="icon-button remove-member-button" aria-label={`Удалить участника ${member.name}`} disabled={busy} onClick={() => { setRemovingId(member.id); setError(''); }}><Trash2 size={18} /></button> : <Check size={18} className="positive-text" />}
+    </div>)}</div>
+    {selected && <div className="remove-member-confirm">
+      <h3>Удалить участника?</h3><p className="help-note"><strong>{selected.name}</strong> потеряет доступ к мероприятию. Расходы и подтверждённые переводы останутся в истории.</p>
+      {reason && <p className="form-error" role="alert">{reason}.</p>}{error && <p className="form-error" role="alert">{error}</p>}
+      <button className="danger-button" disabled={busy || !!reason} onClick={() => { void confirmRemoval(); }}>{busy ? 'Удаляем…' : 'Удалить участника'}</button>
+      <button className="secondary-button" disabled={busy} onClick={() => { setRemovingId(null); setError(''); }}>Отмена</button>
+    </div>}
+    {former.length > 0 && <><div className="section-heading"><h2>Удалённые участники</h2></div><div className="list-surface">{former.map(member => <div className="member-balance" key={member.id}><Avatar member={member} /><div><strong>{member.name}</strong><span>История сохранена</span></div></div>)}</div></>}
+    {live ? canManage && <InviteLink key={trip.id} eventId={trip.id} /> : canManage && <>{availableMembers.filter(member => !people.some(person => person.id === member.id)).map(member => <button className="add-member-button" key={member.id} disabled={busy} aria-label={`Добавить участника ${member.name}`} onClick={() => onAdd(member)}><Avatar member={member} small /><span>{member.name}</span><Plus size={18} /></button>)}<p className="help-note">В демо можно добавлять тестовых друзей.</p></>}
+  </div>;
+}
+
 export default function Raskidai() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [mode, setMode] = useState<'loading' | 'demo' | 'live' | 'error'>('loading');
@@ -190,7 +224,6 @@ export default function Raskidai() {
     tg.ready(); tg.expand(); setDark(tg.colorScheme === 'dark');
     tg.setHeaderColor?.(tg.colorScheme === 'dark' ? '#101115' : '#ffffff');
     tg.setBackgroundColor?.(tg.colorScheme === 'dark' ? '#101115' : '#ffffff');
-    if (!tg.isFullscreen) tg.requestFullscreen?.();
     try {
       const data = await api('login', { initData: tg.initData });
       const verified = telegramMember({ first_name: data.user.firstName, last_name: data.user.lastName, username: data.user.username });
@@ -239,6 +272,12 @@ export default function Raskidai() {
     return () => tg.BackButton.offClick(back);
   }, [tripId, modal, telegramReady]);
   function updateTrip(fn: (current: Trip) => Trip) { setTrips(current => current.map(t => t.id === tripId ? fn(t) : t)); }
+  async function removeMember(memberId: string) {
+    if (!trip) return;
+    if (live) { await api('removeMember', { eventId: trip.id, memberId }); await refreshLive(); }
+    else { const updated = removeTripMember(trip, ME, memberId); updateTrip(() => updated); }
+    notify('Участник удалён. История расходов сохранена');
+  }
   function confirmPending(settlementId: string, actorId: string) {
     if (live && trip) { void perform('confirmTransfer', { eventId: trip.id, id: settlementId }, 'Получение подтверждено. Балансы обновлены'); return; }
     updateTrip(current => confirmPendingSettlement(current, settlementId, actorId)); setModal(null); notify('Получение подтверждено. Балансы обновлены');
@@ -247,6 +286,7 @@ export default function Raskidai() {
   function changeTab(next: Tab) { setTab(next); setTripId(null); window.scrollTo({ top: 0 }); }
   const visibleTrips = trips.filter(t => t.archived === archived);
   const availableMembers = members.map(member => member.id === ME ? currentMember : member);
+  const tripMembers = trip ? activeMembers(trip) : [];
   const currentBalance = trip ? balances(trip) : {};
   const pendingSettlements = trip?.settlements.filter(item => item.status === 'pending') || [];
   const moves = trip ? transfers(trip, true) : [];
@@ -259,14 +299,13 @@ export default function Raskidai() {
   const demoPending = modal?.type === 'demo-confirm' ? pendingSettlements.find(item => item.id === modal.settlementId) : undefined;
 
   if (mode === 'loading' || mode === 'error') return <>
-    <div className="app-shell startup-screen"><div className={`launch-wordmark ${mode === 'loading' ? 'is-loading' : 'is-ready'}`} role={mode === 'loading' ? 'status' : undefined}>Раскидай</div>
+    <div className="app-shell startup-screen">{mode === 'loading' && <div className="launch-wordmark is-loading" role="status">Раскидай</div>}
       {mode === 'error' && <div className="startup-error"><p role="alert">Не удалось подтвердить Telegram-вход: {authError}.</p><button className="primary-button" onClick={() => { void startTelegram(); }}>Попробовать снова</button><button className="secondary-button" onClick={enterDemo}>Открыть демо</button></div>}
     </div>
   </>;
 
   return <>
     <div className={trip ? 'app-shell' : 'app-shell overview-shell'}>
-      <div className="launch-wordmark is-ready">Раскидай</div>
       {trip && <header className="mini-header">
         <button className="back-link" onClick={() => setTripId(null)}><ArrowLeft size={20} /><span>Мероприятия</span></button>
         <div className="header-actions"><button className="icon-button" onClick={() => setModal({ type: 'menu' })} aria-label="Меню мероприятия"><Ellipsis size={23} /></button></div>
@@ -282,7 +321,7 @@ export default function Raskidai() {
 
         {trip && <div className="screen trip-screen">
           <div className="trip-identity"><TripSymbol cover={trip.cover} /><div className="trip-identity-copy"><h1 title={trip.name}>{trip.name}</h1><p><CalendarDays size={14} />{trip.dates}{trip.archived && <span>· Завершено</span>}</p></div></div>
-          <button className="members-row" onClick={() => setModal({ type: 'members' })}><Avatars people={trip.members} /><span className="text-button">Участники <ChevronRight size={15} /></span></button>
+          <button className="members-row" onClick={() => setModal({ type: 'members' })}><Avatars people={tripMembers} /><span className="text-button">Участники <ChevronRight size={15} /></span></button>
           <div className="trip-segments" role="tablist" aria-label="Разделы мероприятия">{(['expenses', 'balances', 'summary'] as TripTab[]).map(value => <button key={value} role="tab" aria-selected={tripTab === value} onClick={() => setTripTab(value)} className={tripTab === value ? 'active' : ''}>{value === 'expenses' ? 'Расходы' : value === 'balances' ? 'Балансы' : 'Сводка'}</button>)}</div>
           <div key={tripTab} className="tab-content" role="tabpanel">
             {tripTab === 'expenses' && <><div className="expense-total"><div><span>Моя доля</span><strong>{money(trip.expenses.reduce((sum, expense) => sum + (expense.splits[ME] || 0), 0))}</strong></div><div><span>Всего потратили</span><strong>{money(trip.expenses.reduce((sum, expense) => sum + expense.amount, 0))}</strong></div></div>
@@ -296,7 +335,7 @@ export default function Raskidai() {
                 {(myPending.length > 0 || myMoves.length > 0) && <section className="transfer-group"><h3>Мои</h3>{myPending.map(item => <TransferCard key={item.id} trip={trip} move={item} pending={item} onConfirm={item.to === ME ? () => confirmPending(item.id, ME) : undefined} onDemoConfirm={item.from === ME && !telegramReady ? () => setModal({ type: 'demo-confirm', settlementId: item.id }) : undefined} />)}{myMoves.map(move => <TransferCard key={move.from + move.to} trip={trip} move={move} onSettle={() => setModal({ type: 'settlement', move })} />)}</section>}
                 {(otherPending.length > 0 || otherMoves.length > 0) && <section className="transfer-group"><h3>Остальные</h3>{otherPending.map(item => <TransferCard key={item.id} trip={trip} move={item} pending={item} />)}{otherMoves.map(move => <TransferCard key={move.from + move.to} trip={trip} move={move} />)}</section>}
               </div> : <div className="settled-state"><span><CheckCheck size={28} /></span><h3>Все в расчёте!</h3><p>Долгов больше нет.</p></div>}
-              <div className="section-heading"><h2>Балансы участников</h2><Info size={16} className="muted" /></div><div className="list-surface">{trip.members.map(member => <div className="member-balance" key={member.id}><Avatar member={member} /><div><strong><DisplayMemberName member={member} /></strong><span>{currentBalance[member.id] > 0 ? 'получит' : currentBalance[member.id] < 0 ? 'вернёт' : 'в расчёте'}</span></div><strong className={currentBalance[member.id] > 0 ? 'positive-text' : currentBalance[member.id] < 0 ? 'negative-text' : 'muted'}>{money(currentBalance[member.id], true)}</strong></div>)}</div><p className="help-note">Предлагаем переводы, чтобы рассчитаться за меньшее число действий.</p>
+              <div className="section-heading"><h2>Балансы участников</h2><Info size={16} className="muted" /></div><div className="list-surface">{tripMembers.map(member => <div className="member-balance" key={member.id}><Avatar member={member} /><div><strong><DisplayMemberName member={member} /></strong><span>{currentBalance[member.id] > 0 ? 'получит' : currentBalance[member.id] < 0 ? 'вернёт' : 'в расчёте'}</span></div><strong className={currentBalance[member.id] > 0 ? 'positive-text' : currentBalance[member.id] < 0 ? 'negative-text' : 'muted'}>{money(currentBalance[member.id], true)}</strong></div>)}</div><p className="help-note">Предлагаем переводы, чтобы рассчитаться за меньшее число действий.</p>
             </>}
             {tripTab === 'summary' && <Summary trip={trip} />}
           </div>
@@ -315,8 +354,8 @@ export default function Raskidai() {
     {modal?.type === 'expense' && trip && <Sheet title={modal.expense ? 'Изменить расход' : 'Новый расход'} onClose={() => setModal(null)}><ExpenseForm key={modal.expense?.id || 'new'} trip={trip} expense={modal.expense} onSave={(expense, requestId) => { if (live) { void perform('saveExpense', { eventId: trip.id, expense, requestId, expectedVersion: modal.expense?.version ?? null }, modal.expense ? 'Расход изменён' : 'Расход добавлен. Всё раскидали!'); return; } updateTrip(t => ({ ...t, expenses: modal.expense ? t.expenses.map(e => e.id === expense.id ? expense : e) : [expense, ...t.expenses] })); setModal(null); setTripTab('expenses'); notify(modal.expense ? 'Расход изменён' : 'Расход добавлен. Всё раскидали!'); }} /></Sheet>}
     {modal?.type === 'settlement' && trip && canMarkSettlement(modal.move) && <Sheet title={modal.move.from === ME ? 'Я перевел' : 'Я получил'} onClose={() => setModal(null)}><SettlementForm trip={trip} move={modal.move} onSave={(amount, date, id) => { const move = modal.move; if (!canMarkSettlement(move)) return; if (live) { if (move.from !== ME) return; void perform('createTransfer', { eventId: trip.id, id, to: move.to, amount, date }, 'Перевод ожидает подтверждения получателя'); return; } const outgoing = move.from === ME; updateTrip(t => ({ ...t, settlements: [{ id: uid(), from: move.from, to: move.to, amount, date, status: outgoing ? 'pending' : 'confirmed', confirmedBy: outgoing ? undefined : ME }, ...t.settlements] })); setModal(null); notify(outgoing ? 'Перевод ожидает подтверждения получателя' : 'Получение подтверждено. Балансы обновлены'); }} /></Sheet>}
     {modal?.type === 'demo-confirm' && trip && demoPending && !telegramReady && <Sheet title="Демо: подтверждение" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">В рабочем приложении получение подтвердит второй участник в своём аккаунте. Здесь можно проверить этот шаг на тестовых данных.</p><div className="demo-transfer-preview"><strong><MemberName id={demoPending.from} trip={trip} /> → <MemberName id={demoPending.to} trip={trip} /></strong><span>{money(demoPending.amount)}</span></div><button className="primary-button" onClick={() => confirmPending(demoPending.id, demoPending.to)}><CheckCheck size={19} />Подтвердить за получателя</button><button className="secondary-button" onClick={() => setModal(null)}>Отмена</button></div></Sheet>}
-    {modal?.type === 'members' && trip && <Sheet title="Участники" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">В мероприятии {trip.members.length} {plural(trip.members.length, ['участник', 'участника', 'участников'])}.</p><div className="list-surface">{trip.members.map(m => <div className="member-balance" key={m.id}><Avatar member={m} /><div><strong><DisplayMemberName member={m} /></strong>{m.username && <span>{m.username}</span>}</div>{m.id === trip.ownerId || (!live && m.id === ME) ? <span className="subtle-pill">Создатель</span> : <Check size={18} className="positive-text" />}</div>)}</div>{live ? <InviteLink key={trip.id} eventId={trip.id} /> : <>{availableMembers.filter(m => !trip.members.some(p => p.id === m.id)).map(member => <button className="add-member-button" key={member.id} aria-label={`Добавить участника ${member.name}`} onClick={() => { updateTrip(t => ({ ...t, members: [...t.members, member] })); notify(`${member.name} теперь в мероприятии`); }}><Avatar member={member} small /><span>{member.name}</span><Plus size={18} /></button>)}<p className="help-note">В демо можно добавлять тестовых друзей.</p></>}</div></Sheet>}
-    {modal?.type === 'details' && trip && <Sheet title="Расход" onClose={() => setModal(null)}><ExpenseDetails trip={trip} expense={modal.expense} canEdit={!live || modal.expense.author === ME || trip.ownerId === ME} onEdit={() => setModal({ type: 'expense', expense: modal.expense })} onDelete={() => { if (live) { void perform('deleteExpense', { eventId: trip.id, id: modal.expense.id, version: modal.expense.version }, 'Расход удалён, балансы пересчитаны'); return; } updateTrip(t => ({ ...t, expenses: t.expenses.filter(e => e.id !== modal.expense.id) })); setModal(null); notify('Расход удалён, балансы пересчитаны'); }} /></Sheet>}
+    {modal?.type === 'members' && trip && <Sheet title="Участники" onClose={() => setModal(null)}><MembersPanel trip={trip} live={live} availableMembers={availableMembers} onRemove={removeMember} onAdd={member => { updateTrip(t => ({ ...t, members: [...t.members.filter(item => item.id !== member.id), { ...member, removed: false }] })); notify(`${member.name} теперь в мероприятии`); }} /></Sheet>}
+    {modal?.type === 'details' && trip && <Sheet title="Расход" onClose={() => setModal(null)}><ExpenseDetails trip={trip} expense={modal.expense} canEdit={!trip.archived && !expenseHasRemovedMember(trip, modal.expense) && (!live || modal.expense.author === ME || trip.ownerId === ME)} onEdit={() => setModal({ type: 'expense', expense: modal.expense })} onDelete={() => { if (live) { void perform('deleteExpense', { eventId: trip.id, id: modal.expense.id, version: modal.expense.version }, 'Расход удалён, балансы пересчитаны'); return; } updateTrip(t => ({ ...t, expenses: t.expenses.filter(e => e.id !== modal.expense.id) })); setModal(null); notify('Расход удалён, балансы пересчитаны'); }} /></Sheet>}
     {modal?.type === 'menu' && trip && <Sheet title="Настройки мероприятия" onClose={() => setModal(null)}><div className="sheet-body"><button className="menu-row" onClick={() => setModal({ type: 'members' })}><UsersRound size={22} /><span>Участники мероприятия</span><ChevronRight size={18} /></button>{(!live || trip.ownerId === ME) && <button className="menu-row" onClick={() => { if (trip.archived) { if (live) { void perform('archive', { eventId: trip.id, archived: false }, 'Мероприятие снова активно'); return; } updateTrip(t => ({ ...t, archived: false })); setModal(null); notify('Мероприятие снова активно'); } else setModal({ type: 'archive' }); }}><Archive size={22} /><span>{trip.archived ? 'Вернуть из архива' : 'Завершить мероприятие'}</span><ChevronRight size={18} /></button>}<button className="menu-row" onClick={() => { setDark(!dark); setModal(null); }}><Moon size={22} /><span>{dark ? 'Светлая тема' : 'Тёмная тема'}</span><ChevronRight size={18} /></button></div></Sheet>}
     {modal?.type === 'archive' && trip && <Sheet title={outstandingCount ? 'Сначала завершите расчёты' : 'Завершить мероприятие?'} onClose={() => setModal(null)}><div className="sheet-body archive-sheet">{outstandingCount ? <><p className="form-intro">Мероприятие можно отправить в архив, когда все долги погашены и переводы подтверждены. Сейчас осталось {outstandingCount} {plural(outstandingCount, ['перевод', 'перевода', 'переводов'])} на {money(outstandingAmount)}{pendingSettlements.length ? `; ${pendingSettlements.length} ${plural(pendingSettlements.length, ['ожидает', 'ожидают', 'ожидают'])} подтверждения` : ''}.</p><button className="primary-button" onClick={() => { setModal(null); setTripTab('balances'); }}>Посмотреть балансы</button><button className="secondary-button" onClick={() => setModal(null)}>Закрыть</button></> : <><p className="form-intro">Все расчёты закрыты. Мероприятие будет перемещено в архив.</p><button className="primary-button" onClick={() => { if (transfers(trip).length || trip.settlements.some(item => item.status === 'pending')) return; if (live) { void perform('archive', { eventId: trip.id, archived: true }, 'Мероприятие перенесено в архив'); return; } updateTrip(t => ({ ...t, archived: true })); setModal(null); notify('Мероприятие перенесено в архив'); }}>Завершить и архивировать</button><button className="secondary-button" onClick={() => setModal(null)}>Отмена</button></>}</div></Sheet>}
     {modal?.type === 'reset' && <Sheet title="Начать сначала?" onClose={() => setModal(null)}><div className="sheet-body"><p className="form-intro">Ваши изменения в прототипе будут удалены. Вернём три тестовых мероприятия и исходные расходы.</p><button className="primary-button" onClick={() => { setTrips(seedTrips().map(item => withCurrentMember(item, currentMember))); setTripId(null); setArchived(false); setTab('trips'); setModal(null); notify('Демо готово к новому мероприятию'); }}>Восстановить тестовые данные</button><button className="secondary-button" onClick={() => setModal(null)}>Оставить как есть</button></div></Sheet>}
@@ -325,16 +364,17 @@ export default function Raskidai() {
 
 function TripCard({ trip, onOpen }: { trip: Trip; onOpen: () => void }) {
   const balance = balances(trip)[ME] || 0;
+  const memberCount = activeMembers(trip).length;
   return <button className="trip-card" onClick={onOpen} aria-label={`Открыть мероприятие ${trip.name}`}>
     <TripSymbol cover={trip.cover} />
-    <span className="card-info"><strong title={trip.name}>{trip.name}</strong><span className="card-date">{trip.dates} · {trip.members.length} {plural(trip.members.length, ['участник', 'участника', 'участников'])}</span><span className={`card-balance ${balance < 0 ? 'negative-text' : balance > 0 ? 'positive-text' : 'muted'}`}>{balance === 0 ? 'Все в расчёте' : balance > 0 ? `Вам вернут ${money(balance)}` : `Вы должны ${money(-balance)}`}</span></span><ChevronRight size={20} className="compact-arrow" />
+    <span className="card-info"><strong title={trip.name}>{trip.name}</strong><span className="card-date">{trip.dates} · {memberCount} {plural(memberCount, ['участник', 'участника', 'участников'])}</span><span className={`card-balance ${balance < 0 ? 'negative-text' : balance > 0 ? 'positive-text' : 'muted'}`}>{balance === 0 ? 'Все в расчёте' : balance > 0 ? `Вам вернут ${money(balance)}` : `Вы должны ${money(-balance)}`}</span></span><ChevronRight size={20} className="compact-arrow" />
   </button>;
 }
 
 function CreateTrip({ allMembers, onCreate, live = false }: { allMembers: Member[]; onCreate: (trip: Trip) => void; live?: boolean }) {
   const draftId = useRef(uid());
   const [name, setName] = useState(''), [cover, setCover] = useState('default'), [friends, setFriends] = useState<string[]>([]), [error, setError] = useState('');
-  return <form className="sheet-body create-trip-form" onSubmit={event => { event.preventDefault(); if (!name.trim()) { setError('Введите название мероприятия'); return; } onCreate({ id: draftId.current, name: name.trim(), subtitle: '', cover, dates: 'Новое мероприятие', members: allMembers.filter(m => m.id === ME || friends.includes(m.id)), expenses: [], settlements: [], archived: false }); }}>
+  return <form className="sheet-body create-trip-form" onSubmit={event => { event.preventDefault(); if (!name.trim()) { setError('Введите название мероприятия'); return; } onCreate({ id: draftId.current, name: name.trim(), subtitle: '', cover, dates: 'Новое мероприятие', members: allMembers.filter(m => m.id === ME || friends.includes(m.id)), expenses: [], settlements: [], ownerId: ME, archived: false }); }}>
     <label className="field-label" htmlFor="trip-name">Название мероприятия</label><input id="trip-name" className="text-input" placeholder="Например, ужин с друзьями" value={name} maxLength={60} onChange={e => { setName(e.target.value); setError(''); }} />
     <div className="field-label" id="trip-icon-label">Иконка мероприятия</div><div className="event-icon-picker" role="group" aria-labelledby="trip-icon-label">{tripSymbolChoices.map(option => <button type="button" key={option.id} className={cover === option.id ? 'selected' : ''} aria-label={option.label} aria-pressed={cover === option.id} title={option.label} onClick={() => setCover(option.id)}><span aria-hidden="true">{tripSymbols[option.id]}</span></button>)}</div>
     {!live && <><label className="field-label">Друзья для демо <span>необязательно</span></label><div className="friend-picker">{allMembers.filter(member => member.id !== ME).map(member => <button type="button" key={member.id} aria-pressed={friends.includes(member.id)} className={friends.includes(member.id) ? 'selected' : ''} onClick={() => setFriends(previous => previous.includes(member.id) ? previous.filter(id => id !== member.id) : [...previous, member.id])}><Avatar member={member} small /><span>{member.name}</span>{friends.includes(member.id) ? <Check size={16} /> : <Plus size={16} />}</button>)}</div></>}<p className="help-note">Вы — первый участник. Можно начать одному и пригласить друзей по ссылке.</p>{error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" type="submit"><CalendarDays size={18} />Создать мероприятие</button>
@@ -347,9 +387,10 @@ function ExpenseForm({ trip, expense, onSave }: { trip: Trip; expense?: Expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount / 100).replace('.', ',') : '');
   const [title, setTitle] = useState(expense?.title || ''), [category, setCategory] = useState<Category>(expense?.category || 'food'), [date, setDate] = useState(expense?.date || today());
   const payer = expense?.payer || ME;
+  const formMembers = activeMembers(trip);
   const authorName = trip.members.find(member => member.id === ME)?.name || members[0].name;
-  const [selected, setSelected] = useState(expense ? Object.keys(expense.splits) : trip.members.map(m => m.id));
-  const [mode, setMode] = useState<SplitMode>(expense?.mode === 'shares' ? 'percent' : expense?.mode || 'equal'), [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(trip.members.map(m => [m.id, expense && expense.mode !== 'equal' ? (expense.mode === 'percent' || expense.mode === 'shares' ? String((expense.splits[m.id] || 0) / expense.amount * 100) : String((expense.splits[m.id] || 0) / 100)) : '1'])));
+  const [selected, setSelected] = useState(expense ? Object.keys(expense.splits) : formMembers.map(m => m.id));
+  const [mode, setMode] = useState<SplitMode>(expense?.mode === 'shares' ? 'percent' : expense?.mode || 'equal'), [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(formMembers.map(m => [m.id, expense && expense.mode !== 'equal' ? (expense.mode === 'percent' || expense.mode === 'shares' ? String((expense.splits[m.id] || 0) / expense.amount * 100) : String((expense.splits[m.id] || 0) / 100)) : '1'])));
   const [error, setError] = useState('');
   let preview: Record<string, number> = {}, previewError = '';
   if (amount) { try { preview = distribute(parseMoney(amount), selected, mode, values); } catch (err) { previewError = (err as Error).message; } }
@@ -364,8 +405,8 @@ function ExpenseForm({ trip, expense, onSave }: { trip: Trip; expense?: Expense;
     <label className="field-label" htmlFor="expense-title">На что?</label><input className="text-input" id="expense-title" placeholder="Например, ужин после прогулки" value={title} maxLength={80} onChange={e => setTitle(e.target.value)} />
     <label className="field-label">Категория</label><div className="category-picker">{categories.map(c => { const Icon = categoryIcons[c.id]; return <button key={c.id} type="button" className={category === c.id ? 'selected' : ''} onClick={() => setCategory(c.id)} aria-pressed={category === c.id}><Icon size={19} /><span>{c.name}</span></button>; })}</div>
     <label className="expense-date-field"><span className="field-label">Дата</span><input className="text-input" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Дата расхода" /></label>
-    <div className="split-heading"><h3>Как раскидать?</h3><span>{selected.length} из {trip.members.length}</span></div><div className="split-segments" role="group" aria-label="Способ распределения">{availableSplitModes.map(value => <button type="button" key={value} className={mode === value ? 'active' : ''} onClick={() => chooseMode(value)} aria-pressed={mode === value}>{splitNames[value]}</button>)}</div>
-    <div className="split-members">{trip.members.map(member => <div className="split-member" key={member.id}><label><input type="checkbox" checked={selected.includes(member.id)} onChange={e => { setSelected(previous => e.target.checked ? [...previous, member.id] : previous.filter(id => id !== member.id)); setError(''); }} /><Avatar member={member} small /><span><DisplayMemberName member={member} /></span></label>{selected.includes(member.id) && (mode === 'equal' ? <strong>{money(preview[member.id] || 0)}</strong> : <div className="split-value"><input aria-label={`${splitNames[mode]}: ${member.name}${member.id === ME ? " (Вы)" : ""}`} inputMode="decimal" value={values[member.id] || ''} onChange={e => setValues(previous => ({ ...previous, [member.id]: e.target.value }))} /><span>{mode === 'percent' ? '%' : mode === 'exact' ? '₽' : 'д.'}</span></div>)}</div>)}</div>
+    <div className="split-heading"><h3>Как раскидать?</h3><span>{selected.length} из {formMembers.length}</span></div><div className="split-segments" role="group" aria-label="Способ распределения">{availableSplitModes.map(value => <button type="button" key={value} className={mode === value ? 'active' : ''} onClick={() => chooseMode(value)} aria-pressed={mode === value}>{splitNames[value]}</button>)}</div>
+    <div className="split-members">{formMembers.map(member => <div className="split-member" key={member.id}><label><input type="checkbox" checked={selected.includes(member.id)} onChange={e => { setSelected(previous => e.target.checked ? [...previous, member.id] : previous.filter(id => id !== member.id)); setError(''); }} /><Avatar member={member} small /><span><DisplayMemberName member={member} /></span></label>{selected.includes(member.id) && (mode === 'equal' ? <strong>{money(preview[member.id] || 0)}</strong> : <div className="split-value"><input aria-label={`${splitNames[mode]}: ${member.name}${member.id === ME ? " (Вы)" : ""}`} inputMode="decimal" value={values[member.id] || ''} onChange={e => setValues(previous => ({ ...previous, [member.id]: e.target.value }))} /><span>{mode === 'percent' ? '%' : mode === 'exact' ? '₽' : 'д.'}</span></div>)}</div>)}</div>
     {mode !== 'equal' && <p className={previewError ? 'split-validation invalid' : 'split-validation'}>{previewError || `Всё сходится: ${money(Object.values(preview).reduce((a, b) => a + b, 0))}`}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}<button className="primary-button" type="submit"><Check size={19} />{expense ? 'Сохранить изменения' : 'Добавить расход'}</button><p className="help-note centered">Балансы пересчитаем сразу после сохранения</p>
   </form>;
@@ -384,7 +425,7 @@ function SettlementForm({ trip, move, onSave }: { trip: Trip; move: Move; onSave
 
 function ExpenseDetails({ expense, trip, onEdit, onDelete, canEdit = true }: { expense: Expense; trip: Trip; onEdit: () => void; onDelete: () => void; canEdit?: boolean }) {
   const [deleting, setDeleting] = useState(false);
-  return <div className="sheet-body"><div className="detail-header"><CategoryIcon category={expense.category} /><h3>{expense.title}</h3><strong>{money(expense.amount)}</strong><p>{dateLabel(expense.date)} · {categories.find(c => c.id === expense.category)?.name}</p></div><div className="detail-payer"><span>Плательщик</span><strong><MemberName id={expense.payer} trip={trip} /></strong></div><div className="split-heading"><h3>Распределение</h3><span>{splitNames[expense.mode]}</span></div><div className="list-surface">{Object.entries(expense.splits).map(([id, amount]) => <div className="member-balance" key={id}><Avatar member={trip.members.find(m => m.id === id)!} small /><strong><MemberName id={id} trip={trip} /></strong><strong>{money(amount)}</strong></div>)}</div><div className="history"><h4><Clock3 size={14} />История</h4>{expense.history.map((entry, i) => <p key={i}>{displayHistory(entry, trip)}</p>)}</div>{deleting ? <div className="delete-confirm"><p>Удалить расход? Балансы будут пересчитаны.</p><button className="danger-button" onClick={onDelete}>Да, удалить расход</button><button className="secondary-button" onClick={() => setDeleting(false)}>Отмена</button></div> : canEdit ? <div className="detail-actions"><button className="secondary-button" onClick={onEdit}><Pencil size={17} />Изменить</button><button className="secondary-button danger-text" onClick={() => setDeleting(true)}><Trash2 size={17} />Удалить</button></div> : null}</div>;
+  return <div className="sheet-body"><div className="detail-header"><CategoryIcon category={expense.category} /><h3>{expense.title}</h3><strong>{money(expense.amount)}</strong><p>{dateLabel(expense.date)} · {categories.find(c => c.id === expense.category)?.name}</p></div><div className="detail-payer"><span>Плательщик</span><strong><MemberName id={expense.payer} trip={trip} /></strong></div><div className="split-heading"><h3>Распределение</h3><span>{splitNames[expense.mode]}</span></div><div className="list-surface">{Object.entries(expense.splits).map(([id, amount]) => <div className="member-balance" key={id}><Avatar member={trip.members.find(m => m.id === id)!} small /><strong><MemberName id={id} trip={trip} /></strong><strong>{money(amount)}</strong></div>)}</div><div className="history"><h4><Clock3 size={14} />История</h4>{expense.history.map((entry, i) => <p key={i}>{displayHistory(entry, trip)}</p>)}</div>{expenseHasRemovedMember(trip, expense) && <p className="help-note">Расход сохранён в истории. Чтобы изменить его, сначала пригласите удалённого участника снова.</p>}{deleting ? <div className="delete-confirm"><p>Удалить расход? Балансы будут пересчитаны.</p><button className="danger-button" onClick={onDelete}>Да, удалить расход</button><button className="secondary-button" onClick={() => setDeleting(false)}>Отмена</button></div> : canEdit ? <div className="detail-actions"><button className="secondary-button" onClick={onEdit}><Pencil size={17} />Изменить</button><button className="secondary-button danger-text" onClick={() => setDeleting(true)}><Trash2 size={17} />Удалить</button></div> : null}</div>;
 }
 
 function Summary({ trip }: { trip: Trip }) {

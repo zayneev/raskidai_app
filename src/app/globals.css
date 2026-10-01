@@ -232,6 +232,12 @@ main { padding-bottom:108px; }
 .danger-button { width:100%; background:#b94444; color:#fff; border-radius:12px; padding:14px; margin-top:12px; font-size:13px; }
 .delete-confirm p { font-size:12px; color:var(--muted); line-height:1.7; }
 .add-member-button { display:flex; align-items:center; gap:10px; width:100%; padding:13px; background:var(--blue-soft); color:var(--blue); border-radius:12px; margin-top:12px; font-size:12px; }
+.member-management-row > div { min-width:0; }
+.member-management-row strong { overflow-wrap:anywhere; }
+.member-management-row > .remove-member-button { color:#b94444; background:color-mix(in srgb,#b94444 8%,var(--surface)); width:40px; height:40px; flex-shrink:0; }
+.remove-member-confirm { margin-top:18px; padding:16px; border-radius:18px; background:var(--surface); }
+.remove-member-confirm h3 { font-size:17px; line-height:1.4; overflow-wrap:anywhere; }
+.remove-member-confirm .help-note { margin:10px 0; }
 .add-member-button > span:nth-child(2) { flex:1; text-align:left; }
 .toast { position:fixed; z-index:50; bottom:105px; left:50%; transform:translateX(-50%); width:max-content; max-width:calc(100% - 32px); background:var(--text); color:var(--surface); border-radius:13px; display:flex; gap:9px; align-items:center; padding:13px 16px; font-size:12px; box-shadow:0 8px 25px #0002; animation:toast-in .22s ease; }
 .toast > span { width:23px; height:23px; background:#41b98d; color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; }
@@ -434,8 +440,8 @@ h2 { font-size:18px; }
 }
 html { -webkit-text-size-adjust:100%; }
 .app-shell { padding-top:var(--app-safe-top); padding-left:var(--app-safe-left); padding-right:var(--app-safe-right); }
-/* Without the overview toolbar, reserve only the wordmark / Telegram controls. */
-.app-shell.overview-shell { padding-top:max(48px, var(--app-safe-top)); }
+/* Telegram provides the title; the overview starts below its native header. */
+.app-shell.overview-shell { padding-top:calc(16px + var(--app-safe-top)); }
 main { padding-bottom:calc(108px + var(--app-safe-bottom)); }
 .bottom-nav { bottom:calc(21px + var(--app-safe-bottom)); width:calc(100% - 28px - var(--app-safe-left) - var(--app-safe-right)); }
 .event-dock { bottom:calc(96px + var(--app-safe-bottom)); padding-left:calc(22px + var(--app-safe-left)); padding-right:calc(22px + var(--app-safe-right)); }
@@ -446,7 +452,6 @@ main { padding-bottom:calc(108px + var(--app-safe-bottom)); }
 .self-label,.row-copy .self-label,.member-balance strong .self-label { color:inherit; }
 .launch-wordmark { position:fixed; z-index:12; top:50dvh; left:50%; transform:translate(-50%,-50%); display:flex; align-items:center; justify-content:center; height:40px; color:var(--text); font-size:30px; font-weight:800; letter-spacing:-1.2px; white-space:nowrap; pointer-events:none; transition:top .8s cubic-bezier(.22,1,.36,1),transform .8s cubic-bezier(.22,1,.36,1),height .8s cubic-bezier(.22,1,.36,1),font-size .8s cubic-bezier(.22,1,.36,1),opacity .3s ease; }
 .launch-wordmark.is-loading { animation:brand-breathe 2.4s ease-in-out infinite; }
-.launch-wordmark.is-ready { top:var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)); height:max(48px, var(--tg-content-safe-area-inset-top, 0px)); transform:translateX(-50%); font-size:18px; }
 @keyframes brand-breathe { 50% { opacity:.42; } }
 .startup-screen { display:flex; align-items:center; justify-content:center; padding:calc(36px + var(--app-safe-top)) 24px calc(36px + var(--app-safe-bottom)); }
 .startup-error { width:100%; display:flex; flex-direction:column; gap:10px; }

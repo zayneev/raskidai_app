@@ -66,6 +66,10 @@ export async function POST(request: NextRequest) {
         const id = await joinInvite(actor, String(body.token || ''));
         return json({ id });
       }
+      case 'removeMember': {
+        await rpc('app_remove_participant', { p_actor: actor, p_event: uuid(body.eventId), p_member: uuid(actorId(String(body.memberId), actor)) });
+        return json({ ok: true });
+      }
       case 'saveExpense': {
         const data = normalizeExpense(body.expense, actor);
         const requestId = uuid(body.requestId);

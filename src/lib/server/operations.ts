@@ -2,14 +2,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { rpc } from './supabase';
 import type { Category, Expense, Member, Trip } from '../model';
 
-type RawMember = { id: string; firstName: string; lastName: string; username: string };
+type RawMember = { id: string; firstName: string; lastName: string; username: string; removed?: boolean };
 type RawExpense = Omit<Expense, 'history'> & { version: number; history: string[] };
 type RawTrip = { id: string; name: string; cover: string; archived: boolean; ownerId: string; members: RawMember[]; expenses: RawExpense[]; settlements: Trip['settlements'] };
 function ownId(value: string, actor: string) { return value === actor ? 'me' : value; }
 function member(raw: RawMember, actor: string): Member {
   const name = [raw.firstName, raw.lastName].filter(Boolean).join(' ').trim();
   const initials = [raw.firstName, raw.lastName].filter(Boolean).map(x => Array.from(x)[0]).join('').toUpperCase();
-  return { id: ownId(raw.id, actor), name, initials, username: raw.username ? `@${raw.username}` : '', color: '#6695dd' };
+  return { id: ownId(raw.id, actor), name, initials, username: raw.username ? `@${raw.username}` : '', color: '#6695dd', removed: raw.removed === true };
 }
 export async function snapshot(actor: string) {
   const raw = await rpc<RawTrip[]>('app_snapshot', { p_actor: actor });
@@ -49,5 +49,5 @@ export async function joinInvite(actor: string, token: string) {
 export function telegramInviteUrl(botUsername: string, token: string, shortName?: string) {
   const bot = botUsername.replace(/^@/, '');
   if (!/^[A-Za-z0-9_]{5,32}$/.test(bot) || !/^[\w-]{32}$/.test(token) || (shortName && !/^[A-Za-z0-9_]{1,64}$/.test(shortName))) throw new Error('Invalid Telegram app link');
-  return `https://t.me/${bot}${shortName ? `/${shortName}` : ''}?startapp=${token}&mode=fullscreen`;
+  return `https://t.me/${bot}${shortName ? `/${shortName}` : ''}?startapp=${token}`;
 }

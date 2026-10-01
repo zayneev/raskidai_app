@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Script from 'next/script';
+import { loadTelegramSdk } from '@/lib/telegram-sdk';
 import { ArrowDownLeft, ArrowUpRight, ArrowLeft, ArrowRight, ArrowLeftRight, Plus, ChevronRight, Ellipsis, Check, X, Wallet, UserRound, Sparkles, Clock3, House, Car, Utensils, Ticket, Shapes, UsersRound, Moon, Sun, Archive, CheckCheck, Pencil, Trash2, Info, CalendarDays, Send, RotateCcw, Copy } from 'lucide-react';
 import { ME, STORAGE_KEY, balances, categories, confirmPendingSettlement, distribute, members, money, parseMoney, personalSummary, plural, seedTrips, today, transfers, uid, type Category, type Expense, type Member, type Settlement, type SplitMode, type Trip } from '@/lib/model';
 
@@ -163,6 +163,7 @@ export default function Raskidai() {
     try { setDark(localStorage.getItem('raskidai:theme') === 'dark'); } catch { setStorageError(true); }
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, []);
+  useEffect(() => { void startTelegram(); }, []);
   useEffect(() => { if (mode !== 'demo') return; try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, trips })); } catch { setStorageError(true); } }, [trips, mode]);
   useEffect(() => { if (mode !== 'demo') return; setTrips(previous => previous.map(item => withCurrentMember(item, currentMember))); }, [currentMember, mode]);
   useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; if (mode !== 'loading') { try { localStorage.setItem('raskidai:theme', dark ? 'dark' : 'light'); } catch { /* Theme remains available in memory. */ } } }, [dark, mode]);
@@ -201,6 +202,14 @@ export default function Raskidai() {
         catch (error) { notify((error as Error).message); }
       }
     } catch (error) { setAuthError((error as Error).message); setMode('error'); }
+  }
+  async function startTelegram() {
+    setMode('loading'); setAuthError(''); launchAttempt.current = false;
+    try { await loadTelegramSdk(); await initTelegram(); }
+    catch {
+      if (hasTelegramLaunchParams()) { setAuthError('Не удалось загрузить Telegram WebApp. Проверьте соединение и попробуйте снова'); setMode('error'); }
+      else enterDemo();
+    }
   }
   useEffect(() => {
     if (!live) return;
@@ -250,14 +259,12 @@ export default function Raskidai() {
   const demoPending = modal?.type === 'demo-confirm' ? pendingSettlements.find(item => item.id === modal.settlementId) : undefined;
 
   if (mode === 'loading' || mode === 'error') return <>
-    <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" onReady={() => { void initTelegram(); }} onError={() => { if (hasTelegramLaunchParams()) { setAuthError('Не удалось загрузить Telegram WebApp'); setMode('error'); } else enterDemo(); }} />
     <div className="app-shell startup-screen"><div className={`launch-wordmark ${mode === 'loading' ? 'is-loading' : 'is-ready'}`} role={mode === 'loading' ? 'status' : undefined}>Раскидай</div>
-      {mode === 'error' && <div className="startup-error"><p role="alert">Не удалось подтвердить Telegram-вход: {authError}.</p><button className="primary-button" onClick={() => { launchAttempt.current = false; if (window.Telegram?.WebApp) void initTelegram(); else location.reload(); }}>Попробовать снова</button><button className="secondary-button" onClick={enterDemo}>Открыть демо</button></div>}
+      {mode === 'error' && <div className="startup-error"><p role="alert">Не удалось подтвердить Telegram-вход: {authError}.</p><button className="primary-button" onClick={() => { void startTelegram(); }}>Попробовать снова</button><button className="secondary-button" onClick={enterDemo}>Открыть демо</button></div>}
     </div>
   </>;
 
   return <>
-    <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" onReady={() => { void initTelegram(); }} />
     <div className={trip ? 'app-shell' : 'app-shell overview-shell'}>
       <div className="launch-wordmark is-ready">Раскидай</div>
       {trip && <header className="mini-header">

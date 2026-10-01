@@ -150,12 +150,13 @@ main { padding-bottom:108px; }
 .prototype-note .brand-icon { margin-bottom:17px; width:40px; height:40px; }
 .prototype-note p { font-size:12px; color:var(--muted); line-height:1.9; margin:13px 0 19px; }
 .prototype-note small { font-size:10px; color:var(--muted); }
-.sheet { border:0; margin:0 auto; padding:0; top:auto; bottom:0; width:100%; max-width:480px; max-height:92dvh; color:var(--text); background:var(--bg); border-radius:25px 25px 0 0; box-shadow:0 -8px 40px #14223522; overflow:hidden; }
+.sheet { border:0; margin:0 auto; padding:0; top:auto; bottom:0; width:100%; max-width:480px; max-height:92dvh; color:var(--text); background:var(--bg); border-radius:25px 25px 0 0; box-shadow:0 -8px 40px #14223522; overflow:hidden; overscroll-behavior:none; touch-action:pan-y pinch-zoom; }
 .sheet[open] { animation:sheet-reveal .28s cubic-bezier(.2,.7,.3,1) both; }
 .sheet::backdrop { background:#17283f65; backdrop-filter:blur(3px); }
 @keyframes sheet-reveal { from { transform:translateY(70px); opacity:.5; } to { transform:translateY(0); opacity:1; } }
-.sheet-inner { display:flex; flex-direction:column; max-height:inherit; }
-.sheet-scroll { min-height:0; overflow-y:auto; overscroll-behavior-y:none; -webkit-overflow-scrolling:touch; padding-bottom:calc(20px + var(--app-safe-bottom)); }
+.sheet-inner { display:flex; flex-direction:column; min-width:0; max-height:inherit; }
+/* iOS must not turn the vertical form into a sideways rubber-band scroller. */
+.sheet-scroll { min-width:0; min-height:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:none; -webkit-overflow-scrolling:touch; padding-bottom:calc(20px + var(--app-safe-bottom)); }
 .sheet-header { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; padding:18px 22px 13px; background:var(--bg); }
 .sheet-header h2 { font-size:21px; letter-spacing:-.5px; }
 .close-button { background:var(--surface); color:var(--muted); width:31px; height:31px; }
@@ -390,6 +391,7 @@ h2 { font-size:18px; }
 .event-dock { position:fixed; z-index:6; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); transform:translateX(-50%); width:100%; max-width:480px; padding:16px 22px 14px; background:linear-gradient(to bottom, transparent, var(--bg) 30%); pointer-events:none; }
 .event-dock .primary-button { pointer-events:auto; box-shadow:0 9px 26px #087cf333; }
 .expense-date-field { display:block; }
+.text-input[type=date] { display:block; min-width:0; max-width:100%; -webkit-appearance:none; appearance:none; }
 .summary-overview { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:21px; padding:18px 16px; border-radius:20px; background:var(--blue-soft); }
 .summary-overview > div { display:flex; flex-direction:column; gap:8px; min-width:0; }
 .summary-overview > div + div { padding-left:14px; border-left:1px solid color-mix(in srgb,var(--blue) 18%,transparent); }
@@ -429,6 +431,8 @@ h2 { font-size:18px; }
 }
 html { -webkit-text-size-adjust:100%; }
 .app-shell { padding-top:var(--app-safe-top); padding-left:var(--app-safe-left); padding-right:var(--app-safe-right); }
+/* Without the overview toolbar, reserve only the wordmark / Telegram controls. */
+.app-shell.overview-shell { padding-top:max(48px, var(--app-safe-top)); }
 main { padding-bottom:calc(108px + var(--app-safe-bottom)); }
 .bottom-nav { bottom:calc(21px + var(--app-safe-bottom)); width:calc(100% - 28px - var(--app-safe-left) - var(--app-safe-right)); }
 .event-dock { bottom:calc(96px + var(--app-safe-bottom)); padding-left:calc(22px + var(--app-safe-left)); padding-right:calc(22px + var(--app-safe-right)); }

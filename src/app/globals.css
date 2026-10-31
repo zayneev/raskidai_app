@@ -93,6 +93,7 @@ main { padding-bottom:108px; }
 .personal-balance > span:last-child { font-size:10px; color:var(--muted); }
 .personal-balance.owed { background:color-mix(in srgb,var(--orange) 8%,var(--surface)); color:var(--orange); border-color:color-mix(in srgb,var(--orange) 14%,transparent); }
 .transfer-list { display:flex; flex-direction:column; gap:11px; }
+.transfer-auto-confirm-note { margin:8px 0 12px; font-size:11px; line-height:1.5; color:var(--muted); }
 .transfer-card { background:var(--surface); border-radius:16px; padding:15px; }
 .transfer-route { display:flex; align-items:center; gap:8px; }
 .transfer-route strong { font-size:12px; }

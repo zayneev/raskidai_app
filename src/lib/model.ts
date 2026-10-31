@@ -2,7 +2,7 @@ export type Member = { id: string; name: string; initials: string; color: string
 export type Category = 'home' | 'transport' | 'food' | 'fun' | 'other';
 export type SplitMode = 'equal' | 'percent' | 'shares' | 'exact';
 export type Expense = { id: string; title: string; amount: number; payer: string; splits: Record<string, number>; category: Category; date: string; mode: SplitMode; author: string; history: string[]; version?: number };
-export type Settlement = { id: string; from: string; to: string; amount: number; date: string; status?: 'pending' | 'confirmed'; confirmedBy?: string };
+export type Settlement = { id: string; from: string; to: string; amount: number; date: string; createdAt?: string; status?: 'pending' | 'confirmed'; confirmedBy?: string; confirmedAutomatically?: boolean };
 export type Trip = { id: string; name: string; subtitle: string; cover: string; dates: string; members: Member[]; expenses: Expense[]; settlements: Settlement[]; archived: boolean; ownerId?: string };
 export const ME = 'me';
 export const members: Member[] = [
@@ -84,6 +84,24 @@ export function confirmPendingSettlement(trip: Trip, settlementId: string, actor
   const settlement = trip.settlements.find(item => item.id === settlementId);
   if (!settlement || settlement.status !== 'pending' || settlement.to !== actorId) throw new Error('Подтвердить получение может только получатель перевода');
   return { ...trip, settlements: trip.settlements.map(item => item.id === settlementId ? { ...item, status: 'confirmed', confirmedBy: actorId } : item) };
+}
+export const TRANSFER_CONFIRMATION_DELAY = 24 * 60 * 60 * 1000;
+// Demo only: live confirmations are performed by the database cron job.
+export function autoConfirmSettlements(trip: Trip, now = Date.now()): Trip {
+  let changed = false;
+  const settlements = trip.settlements.map(item => {
+    if (item.status !== 'pending') return item;
+    const createdAt = item.createdAt ? Date.parse(item.createdAt) : NaN;
+    if (!Number.isFinite(createdAt)) {
+      // Older demo records have only a user-selected date. Start a full waiting period.
+      changed = true;
+      return { ...item, createdAt: new Date(now).toISOString() };
+    }
+    if (createdAt > now - TRANSFER_CONFIRMATION_DELAY) return item;
+    changed = true;
+    return { ...item, status: 'confirmed' as const, confirmedBy: undefined, confirmedAutomatically: true };
+  });
+  return changed ? { ...trip, settlements } : trip;
 }
 export function activeMembers(trip: Trip): Member[] { return trip.members.filter(member => !member.removed); }
 export function memberRemovalReason(trip: Trip, actorId: string, memberId: string): string | null {

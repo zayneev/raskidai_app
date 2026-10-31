@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { distribute, balances, transfers, seedTrips, parseMoney, confirmPendingSettlement, personalSummary } from '../src/lib/model';
+import { distribute, balances, transfers, seedTrips, parseMoney, confirmPendingSettlement, autoConfirmSettlements, personalSummary, TRANSFER_CONFIRMATION_DELAY } from '../src/lib/model';
 test('100 рублей на троих: ни одна копейка не теряется', () => {
   assert.deepEqual(distribute(10000, ['a', 'b', 'c'], 'equal'), { a: 3334, b: 3333, c: 3333 });
 });
@@ -43,6 +43,35 @@ test('частично отправленный перевод не предла
   trip.settlements.push({ id: 'partial-pending', from: 'me', to: 'anya', amount: 100000, date: '2026-09-29', status: 'pending' });
   assert.equal(balances(trip).me, -260000);
   assert.deepEqual(transfers(trip, true).find(item => item.from === 'me'), { from: 'me', to: 'anya', amount: 160000 });
+});
+test('автоподтверждение срабатывает ровно через 24 часа после отправки и учитывает перевод один раз', () => {
+  const trip = seedTrips()[1];
+  const sentAt = Date.parse('2026-10-31T10:00:00Z');
+  const before = balances(trip);
+  trip.settlements.push({ id: 'auto', from: 'me', to: 'anya', amount: 100000, date: '2020-01-01', createdAt: new Date(sentAt).toISOString(), status: 'pending' });
+  assert.equal(autoConfirmSettlements(trip, sentAt + TRANSFER_CONFIRMATION_DELAY - 1), trip);
+  const confirmed = autoConfirmSettlements(trip, sentAt + TRANSFER_CONFIRMATION_DELAY);
+  const settlement = confirmed.settlements.find(item => item.id === 'auto');
+  assert.equal(settlement?.status, 'confirmed');
+  assert.equal(settlement?.confirmedAutomatically, true);
+  assert.equal(settlement?.confirmedBy, undefined);
+  assert.equal(balances(confirmed).me, before.me + 100000);
+  assert.equal(personalSummary(confirmed, 'me').pendingOutgoing, 0);
+  assert.equal(autoConfirmSettlements(confirmed, sentAt + TRANSFER_CONFIRMATION_DELAY * 2), confirmed);
+});
+test('ручное подтверждение сохраняется, а старые демо-записи получают полные 24 часа ожидания', () => {
+  const trip = seedTrips()[1];
+  const now = Date.parse('2026-10-31T10:00:00Z');
+  trip.settlements.push(
+    { id: 'legacy', from: 'me', to: 'anya', amount: 100000, date: '2020-01-01', status: 'pending' },
+    { id: 'manual', from: 'me', to: 'anya', amount: 10000, date: '2020-01-01', createdAt: '2020-01-01T00:00:00Z', status: 'confirmed', confirmedBy: 'anya' },
+  );
+  const migrated = autoConfirmSettlements(trip, now);
+  assert.equal(migrated.settlements.find(item => item.id === 'legacy')?.createdAt, new Date(now).toISOString());
+  assert.equal(migrated.settlements.find(item => item.id === 'legacy')?.status, 'pending');
+  assert.equal(autoConfirmSettlements(migrated, now + TRANSFER_CONFIRMATION_DELAY - 1), migrated);
+  assert.equal(autoConfirmSettlements(migrated, now + TRANSFER_CONFIRMATION_DELAY).settlements.find(item => item.id === 'legacy')?.status, 'confirmed');
+  assert.equal(migrated.settlements.find(item => item.id === 'manual'), trip.settlements.find(item => item.id === 'manual'));
 });
 test('сводка отделяет подтверждённые возвраты от ожидающих и сходится с балансом', () => {
   const trip = seedTrips()[0];

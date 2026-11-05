@@ -459,3 +459,23 @@ main { padding-bottom:calc(108px + var(--app-safe-bottom)); }
 .startup-error p { color:var(--muted); font-size:15px; line-height:1.6; margin-bottom:10px; }
 .startup-error .secondary-button { margin-top:0; }
 @media(max-width:359px) { .event-dock { padding-left:calc(16px + var(--app-safe-left)); padding-right:calc(16px + var(--app-safe-right)); } }
+
+.participant-invites { margin-top:22px; }
+.participant-invites .invite-link-panel { margin-top:12px; }
+.invitation-ready { background:var(--surface); border-radius:18px; padding:16px; }
+.invitation-ready-title { display:flex; align-items:center; gap:8px; color:var(--green); }
+.invitation-ready-title h3 { font-size:15px; }
+.invitation-ready .help-note { margin:12px 0 16px; }
+.invitation-later { width:100%; min-height:44px; margin-top:8px; color:var(--muted); font-size:13px; }
+.invitation-link-fallback { margin-top:18px; }
+.invitation-preview > h3 { font-size:25px; line-height:1.2; letter-spacing:-.6px; overflow-wrap:anywhere; }
+.invitation-event-icon { width:56px; height:56px; border-radius:18px; display:flex; align-items:center; justify-content:center; background:var(--blue-soft); color:var(--blue); margin:0 0 20px; }
+.invitation-share { display:flex; flex-direction:column; gap:8px; background:var(--surface); border-radius:17px; padding:18px; margin:20px 0; }
+.invitation-share > span,.invitation-share > p { color:var(--muted); font-size:12px; line-height:1.5; }
+.invitation-share > strong { font-size:31px; letter-spacing:-.8px; font-variant-numeric:tabular-nums; }
+.invitation-preview > .primary-button { margin-top:20px; }
+.member-balance .membership-status { display:block; font-size:11px; color:var(--muted); }
+.member-balance span.membership-status.joined { color:var(--green); }
+.member-management-row > .icon-button { flex-shrink:0; }
+.split-member-label { display:flex; flex-direction:column; gap:3px; }
+.split-member-label > small { color:var(--muted); font-size:10px; }

@@ -1,4 +1,5 @@
-export type Member = { id: string; name: string; initials: string; color: string; username: string; removed?: boolean };
+export type Member = { id: string; name: string; initials: string; color: string; username: string; removed?: boolean; status?: 'invited' | 'joined' };
+export type InvitationPreview = { id: string; name: string; cover: string; ownerName: string; memberCount: number; personalShare: number; joined: boolean };
 export type Category = 'home' | 'transport' | 'food' | 'fun' | 'other';
 export type SplitMode = 'equal' | 'percent' | 'shares' | 'exact';
 export type Expense = { id: string; title: string; amount: number; payer: string; splits: Record<string, number>; category: Category; date: string; mode: SplitMode; author: string; history: string[]; version?: number };

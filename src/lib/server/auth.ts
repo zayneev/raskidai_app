@@ -4,7 +4,7 @@ const sessionName = 'raskidai_session';
 const lifetime = 60 * 60 * 24;
 export { sessionName };
 
-export type TelegramIdentity = { id: number; first_name: string; last_name?: string; username?: string };
+export type TelegramIdentity = { id: number; first_name: string; last_name?: string; username?: string; allows_write_to_pm?: boolean };
 export class TelegramAuthError extends Error {}
 
 export function verifyTelegramInitData(raw: string, botToken: string, now = Math.floor(Date.now() / 1000)): TelegramIdentity {
@@ -23,7 +23,7 @@ export function verifyTelegramInitData(raw: string, botToken: string, now = Math
   try { user = JSON.parse(params.get('user') || ''); } catch { throw new TelegramAuthError('Missing Telegram user'); }
   const u = user as Partial<TelegramIdentity>;
   if (!u || !Number.isSafeInteger(u.id) || !u.id || typeof u.first_name !== 'string' || !u.first_name.trim()) throw new TelegramAuthError('Invalid Telegram user');
-  return { id: u.id, first_name: u.first_name.trim(), last_name: typeof u.last_name === 'string' ? u.last_name : '', username: typeof u.username === 'string' ? u.username : '' };
+  return { id: u.id, first_name: u.first_name.trim(), last_name: typeof u.last_name === 'string' ? u.last_name : '', username: typeof u.username === 'string' ? u.username : '', allows_write_to_pm: typeof u.allows_write_to_pm === 'boolean' ? u.allows_write_to_pm : undefined };
 }
 
 function secret() {

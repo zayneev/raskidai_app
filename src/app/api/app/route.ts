@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSession, readSession, sessionMaxAge, sessionName, TelegramAuthError, verifyTelegramInitData } from '@/lib/server/auth';
 import { actorId, joinInvite, newInvite, normalizeExpense, snapshot, telegramInviteUrl, validUuid } from '@/lib/server/operations';
 import { DatabaseError, rpc } from '@/lib/server/supabase';
+import { createHash } from 'node:crypto';
+import { prepareMemberSelection, prepareParticipantInvitation, TelegramApiError } from '@/lib/server/telegram';
 
 export const runtime = 'nodejs';
 const noStore = { 'Cache-Control': 'private, no-store' };
 function json(data: unknown, status = 200) { return NextResponse.json(data, { status, headers: noStore }); }
 function fail(error: unknown) {
-  const status = error instanceof DatabaseError ? error.status : error instanceof TelegramAuthError ? 401 : error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500;
+  const status = error instanceof DatabaseError || error instanceof TelegramApiError ? error.status : error instanceof TelegramAuthError ? 401 : error instanceof Error && error.message.startsWith('Invalid') ? 400 : 500;
   return json({ error: error instanceof Error ? error.message : 'Request failed' }, status);
 }
 function session(request: NextRequest) { return readSession(request.cookies.get(sessionName)?.value); }
@@ -41,6 +43,7 @@ export async function POST(request: NextRequest) {
         p_telegram_id: identity.id, p_first_name: identity.first_name,
         p_last_name: identity.last_name || '', p_username: identity.username || '',
       });
+      if (identity.allows_write_to_pm !== undefined) await rpc('app_set_telegram_write_access', { p_actor: actor, p_allowed: identity.allows_write_to_pm });
       const response = json({ trips: await snapshot(actor), user: { id: actor, firstName: identity.first_name, lastName: identity.last_name || '', username: identity.username || '' } });
       response.cookies.set(sessionName, createSession(actor), { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: sessionMaxAge });
       return response;
@@ -49,6 +52,22 @@ export async function POST(request: NextRequest) {
     if (!actor) return json({ error: 'Unauthorized' }, 401);
     const event = body.eventId === undefined ? undefined : uuid(body.eventId);
     switch (body.action) {
+      case 'selectParticipants': {
+        return json(await prepareMemberSelection(actor, uuid(body.eventId)));
+      }
+      case 'participantSelection': {
+        if (!Number.isInteger(body.requestId) || Number(body.requestId) < 1 || Number(body.requestId) > 2147483647) throw new Error('Invalid request ID');
+        return json(await rpc('app_member_request_result', { p_actor: actor, p_event: uuid(body.eventId), p_request: body.requestId }));
+      }
+      case 'shareParticipantInvite': {
+        if (!Array.isArray(body.memberIds) || body.memberIds.length > 10 || body.memberIds.some(id => !validUuid(id)) || new Set(body.memberIds).size !== body.memberIds.length ||
+            !['personal', 'group', 'any'].includes(String(body.delivery))) throw new Error('Invalid participants');
+        return json(await prepareParticipantInvitation(actor, uuid(body.eventId), body.memberIds, body.delivery as 'personal' | 'group' | 'any'));
+      }
+      case 'previewInvite': {
+        if (typeof body.token !== 'string' || !/^[\w-]{32}$/.test(body.token)) throw new Error('Invalid invite');
+        return json(await rpc('app_preview_invite', { p_actor: actor, p_hash: createHash('sha256').update(body.token).digest('hex') }));
+      }
       case 'createEvent': {
         const id = uuid(body.id);
         if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > 60 || typeof body.cover !== 'string') throw new Error('Invalid event');
